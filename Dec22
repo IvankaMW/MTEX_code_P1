@@ -1,0 +1,305 @@
+%% Script for figs for experimental EBSD Data
+% MTEX 5.1.1
+clear all
+%% Crystal and Specimen Symmetries
+CS = {'notIndexed', crystalSymmetry('-3m1', [4.99 4.99 17.064], 'X||a', 'Y||b*', 'Z||c*', 'mineral', 'Calcite', 'color', 'light blue')};
+
+% plotting convention
+setMTEXpref('xAxisDirection','east');
+setMTEXpref('zAxisDirection','outOfPlane');
+
+%% import, rotate, clean
+% import:
+pname = 'C:\Users\Documents\MATLAB\';
+fname = [pname '\.ang'];  
+ebsd = loadEBSD(fname,CS,'interface','ang');
+
+%% rotate
+% for reference frame correction for Uni Wien setup:
+rot1 = rotation('axis',zvector,'angle',90*degree );
+ebsd = rotate(ebsd,rot1,'keepXY');
+rot2 = rotation('axis',xvector,'angle',180*degree );
+ebsd = rotate(ebsd,rot2,'keepEuler');
+% to match thin section position
+rot3 = rotation('axis',zvector,'angle',180*degree );
+ebsd = rotate(ebsd,rot3);
+
+%%
+% clean bad data and nonIndexed points:
+ebsd(ebsd.ci<0.1 ).phase=-1 % cleans and makes NonIndex separate from Indexed
+%figure, plot(ebsd)
+
+%% Polygon cutting
+% Open a map:
+figure, plot(ebsd)
+
+% Select the subset / polygon
+poly = selectPolygon
+poly_ebsd = ebsd(inpolygon(ebsd,poly))
+
+% plot new map
+figure, plot(poly_ebsd)
+
+%% save polygon data as the ebsd data
+whole_ebsd=ebsd
+ebsd=poly_ebsd
+
+%% calculate grains 
+[grains3,ebsd.grainId,ebsd.mis2mean]=calcGrains(ebsd,'angle',3*degree);
+big_grains=grains3(grains3.grainSize > 3);
+big_ebsd=ebsd(grains3(big_grains.id));
+
+% use calcite data only:
+ebsd=big_ebsd('Calcite')
+grains=big_grains('Calcite')
+
+%% plot
+% plot the key:
+oM=ipdfHSVOrientationMapping(ebsd);
+figure, plot(oM,'anotate')  
+
+% pick the plotting orientation (vector):
+oM.inversePoleFigureDirection = zvector; 
+colorZ=oM.orientation2color(ebsd.orientations);
+% plot IPFz
+figure, plot(ebsd,colorZ) 
+
+% IQ + mean orientation
+figure, plot(ebsd,ebsd.iq)
+mtexColorMap gray
+hold on
+plot(grains,grains.meanOrientation,'transparent',0.66)
+hold off
+
+%%
+% Define orientations to be plotted
+PF_ca = [Miller(0,0,0,1,ebsd('Calcite').CS,'hkil'), ... % c axis
+    Miller(-1,-1,2,0,ebsd('Calcite').CS,'hkil')]; ... % a+ axis
+ 
+%% POLE FIGURES  
+% random orientation
+figure
+plotPDF(ebsd.orientations,PF_ca,'hemisphere','lower','projection','earea','antipodal')
+
+% 1 point per grain (no bias due to large grains)
+cc_1pg = grains.meanOrientation;  
+
+figure
+plotPDF(cc_1pg,PF_ca,'hemisphere','lower','projection','earea','antipodal', ...
+    'points','all','markersize',1.5)
+
+%% IDENTIFY calcite-calcite BOUNDARY
+gb_cc = grains.boundary('Calcite','Calcite')
+
+% IDENTIFY TWINS BOUNDARY
+CS_cc = grains.CS
+% defining twins after literature
+twins = orientation( 'map', Miller(1,0,-1,4,CS_cc), Miller(1,0,-1,4,CS_cc), Miller(1,-1,0,8,CS_cc), Miller(-1,1,0,-8,CS_cc) )
+%twinning is actually a rotation about axis (10-14) and angle 78.1030:
+round(twins.axis) % the rotational axis
+twins.angle/degree % the rotational angle
+%extract from the grains its boundary and save it to a seperate variable
+gB = grains.boundary
+%restrict the grain boundaries to a specific phase transistion you shall do
+cc_gB = gB('Calcite','Calcite')
+%check for each boundary segment whether it is a twinning boundary
+% restrict to twinnings with threshold 5 degree
+is_twin = angle(cc_gB.misorientation,twins) < 5*degree;
+twin_bdr = cc_gB(is_twin)
+
+% MERGE TWIN to PARENT
+[mergedGrains,parentId] = merge(grains3,twin_bdr); 
+
+% IPF + grain boundaries
+oM=ipfHSVKey(ebsd); 
+oM.inversePoleFigureDirection = zvector;
+colorZ=oM.orientation2color(ebsd.orientations);
+
+merged_bnd = mergedGrains.boundary('Calcite','Calcite');
+
+%% VARIOUS PLOTS
+% non-twinned boundaries only
+figure
+plot(ebsd,'transparent',0.66)
+hold on
+plot(mergedGrains.boundary)
+plot(merged_bnd,merged_bnd.misorientation.angle./degree,'linewidth',2)
+mtexColorMap cool
+mtexColorbar
+hold off
+
+% misorientation angle 
+figure
+plot(ebsd,ebsd.mis2mean.angle./degree)
+colormap(parula)
+%mtexColorbar
+mtexColorbar('location','southOutSide')
+hold on
+plot(gb_cc,'edgecolor','k','linewidth',.9)
+hold off
+
+% IPFz + grain boundaries misorientation angle AFTER merging
+figure
+plot(ebsd,colorZ,'transparent',0.70)
+hold on
+plot(mergedGrains.boundary)
+plot(merged_bnd,merged_bnd.misorientation.angle./degree,'linewidth',1)
+mtexColorMap cool
+mtexColorbar
+%mtexColorbar('location','southOutSide')
+hold off
+
+% IPFz + merged grains + MO angle boundaries
+figure
+plot(ebsd,colorZ,'transparent',0.90)
+hold on
+plot(mergedGrains.boundary)
+plot(gb_cc,gb_cc.misorientation.angle./degree,'linewidth',1)
+mtexColorMap cool
+%texColorbar
+mtexColorbar('location','southOutSide')
+hold off
+
+% IPFz + MO angle boundaries
+figure
+plot(ebsd,colorZ)
+hold on
+plot(grains.boundary)
+plot(gb_cc,gb_cc.misorientation.angle./degree,'linewidth',1)
+mtexColorMap cool
+%texColorbar
+mtexColorbar('location','southOutSide')
+hold off
+
+% IQ + mean orientation + MO angle boundaries
+figure 
+%plot(ebsd,ebsd.iq)
+%mtexColorMap gray
+%hold on
+%plot(grains,grains.meanOrientation,'transparent',0.66)
+plot(grains,grains.meanOrientation)
+hold on
+plot(gb_cc,gb_cc.misorientation.angle./degree,'linewidth',1)
+colormap(cool)
+%mtexColorbar('location','southOutSide')
+mtexColorbar
+hold off
+
+%% MISORIENTATION ANALYSIS 
+% open the MisOri map:  
+figure, plot(ebsd,ebsd.mis2mean.angle./degree)
+colormap(parula)
+mtexColorbar
+hold on
+plot(gb_cc,'edgecolor','k','linewidth',.5)
+hold off  
+
+% Manually select data - two points to form a line:
+lineX = ginput(2) % select a line change (2) if your profile should have more than two points
+% Save the data:
+[ebsd_lineX, dist]= spatialProfile(ebsd,lineX);
+
+%plot pdf with points colorcoded after distance to origin
+figure
+plotPDF(ebsd_lineX.orientations,dist, PF_ca,'hemisphere','lower','projection','earea','antipodal','points','all','MarkerSize',10)
+
+% (mis)orientation profile:
+% misorinetation angles
+o=ebsd_lineX.orientations
+m = o(1:end-1).\o(2:end) %misor to neigbour
+mo = o(1).\o(2:end) %misor to origin
+
+figure
+plot(dist(1:end-1),angle(mo)/degree,'linewidth',2)
+hold on
+plot(dist(1:end-1), angle(m)/degree,'color','r','linewidth',2)
+xlabel('distance','FontSize',16); ylabel('misorientation angle in degree','FontSize',16)
+legend('to reference orientation','to neighbour')
+title(['misor angles (all angles)'],'FontSize',16)
+
+%% 
+%% Extracting individual grains
+figure
+%plot(ebsd,ebsd.mis2mean.angle./degree)
+plot(ebsd,colorZ)
+
+% within 1st grain
+ref_xy1 = ginput(1) 
+ref_grains_id1 = findByLocation(grains,ref_xy1); % mergedGrains
+% now get the actual ebsd point
+ref_grains1 = grains(ref_grains_id1); % mergedGrains
+ebsd_refgrain1=ebsd(ref_grains1)
+orientation1=ebsd_refgrain1.orientations
+
+% within 2nd grain
+ref_xy2 = ginput(1) 
+ref_grains_id2 = findByLocation(grains,ref_xy2); 
+% now get the actual ebsd point
+ref_grains2 = grains(ref_grains_id2); 
+ebsd_refgrain2=ebsd(ref_grains2)
+orientation2=ebsd_refgrain2.orientations
+
+% within 3rd grain
+ref_xy3 = ginput(1) 
+ref_grains_id3 = findByLocation(grains,ref_xy3); 
+% now get the actual ebsd point
+ref_grains3 = grains(ref_grains_id3);
+ebsd_refgrain3=ebsd(ref_grains3)
+orientation3=ebsd_refgrain3.orientations
+
+% within 4th grain
+ref_xy4 = ginput(1) 
+ref_grains_id4 = findByLocation(grains,ref_xy4); 
+ref_grains4 = grains(ref_grains_id4); 
+ebsd_refgrain4=ebsd(ref_grains4)
+orientation4=ebsd_refgrain4.orientations
+
+% within 5th grain
+%ref_xy5 = ginput(1) 
+%ref_grains_id5 = findByLocation(grains,ref_xy5); 
+% now get the actual ebsd point
+%ref_grains5 = grains(ref_grains_id5); 
+%ebsd_refgrain5=ebsd(ref_grains5)
+%orientation5=ebsd_refgrain5.orientations
+
+c_axis = Miller(0,0,0,1,ebsd('Calcite').CS,'hkl');
+
+figure 
+plotPDF(orientation1,c_axis,'MarkerFaceColor','g','hemisphere','lower','projection','earea','antipodal','MarkerSize',5)
+hold on
+plotPDF(orientation2,c_axis,'MarkerFaceColor','y','hemisphere','lower','projection','earea','antipodal','MarkerSize',5)
+hold on
+plotPDF(orientation3,c_axis,'MarkerFaceColor','c','hemisphere','lower','projection','earea','antipodal','MarkerSize',5)
+hold on
+plotPDF(orientation4,c_axis,'MarkerFaceColor','m','hemisphere','lower','projection','earea','antipodal','MarkerSize',5)
+%hold on
+%plotPDF(orientation5,c_axis,'MarkerFaceColor','b','hemisphere','lower','projection','earea','antipodal','MarkerSize',5)
+hold off
+
+a_axis = Miller(-1,-1,2,0,ebsd('Calcite').CS,'hkl');
+
+figure
+plotPDF(orientation1,a_axis,'MarkerFaceColor','g','hemisphere','lower','projection','earea','antipodal','MarkerSize',5)
+hold on
+plotPDF(orientation2,a_axis,'MarkerFaceColor','y','hemisphere','lower','projection','earea','antipodal','MarkerSize',5)
+hold on
+plotPDF(orientation3,a_axis,'MarkerFaceColor','c','hemisphere','lower','projection','earea','antipodal','MarkerSize',5)
+hold on
+plotPDF(orientation4,a_axis,'MarkerFaceColor','m','hemisphere','lower','projection','earea','antipodal','MarkerSize',5)
+%hold on
+%plotPDF(orientation5,a_axis,'MarkerFaceColor','b','hemisphere','lower','projection','earea','antipodal','MarkerSize',5)
+hold off
+
+e_axis = Miller(0,1,-1,8,ebsd('Calcite').CS,'hkl'); % e slip system (twinning)
+
+figure
+plotPDF(orientation1,e_axis,'MarkerFaceColor','g','hemisphere','lower','projection','earea','antipodal','MarkerSize',5)
+hold on
+plotPDF(orientation2,e_axis,'MarkerFaceColor','y','hemisphere','lower','projection','earea','antipodal','MarkerSize',5)
+hold on
+plotPDF(orientation3,e_axis,'MarkerFaceColor','c','hemisphere','lower','projection','earea','antipodal','MarkerSize',5)
+hold on
+plotPDF(orientation4,e_axis,'MarkerFaceColor','m','hemisphere','lower','projection','earea','antipodal','MarkerSize',5)
+%hold on
+%plotPDF(orientation5,e_axis,'MarkerFaceColor','b','hemisphere','lower','projection','earea','antipodal','MarkerSize',5)
+hold off
